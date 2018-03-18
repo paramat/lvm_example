@@ -1,4 +1,4 @@
--- 3D noise parameters for terrain.
+-- Set the 3D noise parameters for the terrain.
 
 local np_terrain = {
 	offset = 0,
@@ -12,18 +12,21 @@ local np_terrain = {
 }
 
 
--- Set singlenode mapgen and disable engine lighting calculation.
+-- Set singlenode mapgen (air nodes only).
+-- Disable the engine lighting calculation since that will be done for a
+-- mapchunk of air nodes and will be incorrect after we place nodes.
 
 minetest.set_mapgen_params({mgname = "singlenode", flags = "nolight"})
 
 
--- Get the content IDs for the nodes we will use.
+-- Get the content IDs for the nodes used.
 
 local c_sandstone = minetest.get_content_id("default:sandstone")
 local c_water     = minetest.get_content_id("default:water_source")
 
 
--- Initialize noise object to nil.
+-- Initialize noise object to nil. It will be created once only during the
+-- generation of the first mapchunk, to minimise memory use.
 
 local nobj_terrain = nil
 
@@ -31,16 +34,16 @@ local nobj_terrain = nil
 -- Localise noise buffer table outside the loop, to be re-used for all
 -- mapchunks, therefore minimising memory use.
 
-local nbuf_terrain = {}
+local nvals_terrain = {}
 
 
 -- Localise data buffer table outside the loop, to be re-used for all
 -- mapchunks, therefore minimising memory use.
 
-local dbuf = {}
+local data = {}
 
 
--- On generated function
+-- On generated function.
 
 -- 'minp' and 'maxp' are the minimum and maximum positions of the mapchunk that
 -- define the 3D volume.
@@ -48,33 +51,41 @@ minetest.register_on_generated(function(minp, maxp, seed)
 	-- Start time of mapchunk generation.
 	local t0 = os.clock()
 	
-	-- Side length of mapchunk
+	-- Noise stuff.
+
+	-- Side length of mapchunk.
 	local sidelen = maxp.x - minp.x + 1
 	-- Required dimensions of the 3D noise perlin map.
-	local pmdims3d = {x = sidelen, y = sidelen, z = sidelen}
+	local permapdims3d = {x = sidelen, y = sidelen, z = sidelen}
 	-- Create the perlin map noise object once only, during the generation of
 	-- the first mapchunk when 'nobj_terrain' is 'nil'.
 	nobj_terrain = nobj_terrain or
-		minetest.get_perlin_map(np_terrain, pmdims3d)
+		minetest.get_perlin_map(np_terrain, permapdims3d)
 	-- Create a flat array of noise values from the perlin map, with the
 	-- minimum point being 'minp'.
-	local nvals_terrain = nobj_terrain:get3dMap_flat(minp, nbuf_terrain)
+	-- Set the buffer parameter to use and reuse 'nvals_terrain' for this.
+	nobj_terrain:get3dMap_flat(minp, nvals_terrain)
 
-	-- Load the voxelmanip with the result of engine mapgen. Since we used
-	-- 'singlenode' mapgen this will be a mapchunk of air nodes.
+	-- Voxelmanip stuff.
+
+	-- Load the voxelmanip with the result of engine mapgen. Since 'singlenode'
+	-- mapgen is used this will be a mapchunk of air nodes.
 	local vm, emin, emax = minetest.get_mapgen_object("voxelmanip")
 	-- 'area' is used later to get the voxelmanip indexes for positions.
 	local area = VoxelArea:new{MinEdge = emin, MaxEdge = emax}
 	-- Get the content ID data from the voxelmanip in the form of a flat array.
-	local data = vm:get_data(dbuf)
+	-- Set the buffer parameter to use and reuse 'data' for this.
+	vm:get_data(data)
+
+	-- Generation loop.
 
 	-- Noise index for the flat array of noise values.
 	local ni = 1
-
 	-- Process the content IDs in 'data'.
 	-- The most useful order is a ZYX loop because:
 	-- 1. This matches the order of the 3D noise flat array.
-	-- 2. This allows us to simply increment the voxelmanip index along x rows.
+	-- 2. This allows a simple +1 incrementing of the voxelmanip index along x
+	-- rows.
 	for z = minp.z, maxp.z do
 	for y = minp.y, maxp.y do
 		-- Voxelmanip index for the flat array of content IDs.
@@ -111,14 +122,14 @@ minetest.register_on_generated(function(minp, maxp, seed)
 
 	-- After processing, write content ID data back to the voxelmanip.
 	vm:set_data(data)
-	-- Calculate lighting for what we have created.
+	-- Calculate lighting for what has been created.
 	vm:calc_lighting()
-	-- Write what we have created to the world.
+	-- Write what has been created to the world.
 	vm:write_to_map(data)
 	-- Liquid nodes were placed so set them flowing.
 	vm:update_liquids()
 
 	-- Print generation time of this mapchunk.
 	local chugent = math.ceil((os.clock() - t0) * 1000)
-	print ("[lvm_example] Mapchunk generation time "..chugent.." ms")
+	print ("[lvm_example] Mapchunk generation time " .. chugent .. " ms")
 end)
