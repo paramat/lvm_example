@@ -125,7 +125,7 @@ minetest.register_on_generated(function(minp, maxp, seed)
 	-- Calculate lighting for what has been created.
 	vm:calc_lighting()
 	-- Write what has been created to the world.
-	vm:write_to_map(data)
+	vm:write_to_map()
 	-- Liquid nodes were placed so set them flowing.
 	vm:update_liquids()
 
